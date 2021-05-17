@@ -114,9 +114,9 @@ namespace NotionUnity
 
     public class TableCell
     {
-        public string Name { get; set; }
-        public string Type { get; set; }
-        public object Value { get; set; }
+        public string Name { get; private set; }
+        public string Type { get; private set; }
+        public object Value { get; private set; }
 
         public TableCell(JProperty jProperty)
         {
@@ -164,10 +164,18 @@ namespace NotionUnity
 
                 case "phone_number":
                     return item["phone_number"].ToString();
+                
+                case "files":
+                    return string.Empty;
 
                 default:
                     throw new ArgumentException("Unknown/Unsupported item type: " + item["type"]);
             }
+        }
+                
+        public override string ToString()
+        {
+            return $"{Name}({Type}) = {Value}";
         }
     }
 
@@ -178,6 +186,16 @@ namespace NotionUnity
         public TableLine(JToken token)
         {
             Cells = token.Select(t => new TableCell((JProperty) t)).ToArray();
+        }
+        
+        /// <summary>
+        /// Get a cell using it's Notion name
+        /// </summary>
+        /// <param name="cellName"></param>
+        /// <returns></returns>
+        public TableCell Get(string cellName)
+        {
+            return Cells.FirstOrDefault(c => c.Name == cellName);
         }
     }
 
