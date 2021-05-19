@@ -117,11 +117,13 @@ namespace NotionUnity
         public string Name { get; private set; }
         public string Type { get; private set; }
         public object Value { get; private set; }
+        public string RawJSON { get; private set; }
 
         public TableCell(JProperty jProperty)
         {
             Name = jProperty.Name;
             Value = ParseLine(jProperty.Value);
+            RawJSON = jProperty.ToString();
         }
 
         public object ParseLine(JToken item)
@@ -132,11 +134,23 @@ namespace NotionUnity
             // Debug.Log("[" + row + "] " + columnName + " " + type + "\n" + item);
             switch (Type)
             {
-                case "title":
-                    return item["title"].Any() ? item["title"][0]["plain_text"].ToString() : string.Empty;
+               case "title":
+                    string titleContent = string.Empty;
+                    foreach (var t in item["title"])
+                    {
+                        titleContent += t["plain_text"].ToString();
+                    }
+
+                    return titleContent;
 
                 case "text":
-                    return item["text"].Any() ? item["text"][0]["text"]["content"].ToString() : string.Empty;
+                    string textContent = string.Empty;
+                    foreach (var t in item["text"])
+                    {
+                        textContent += t["plain_text"].ToString();
+                    }
+
+                    return textContent;
 
                 case "multi_select":
                     return item["multi_select"].Select(m => m.ToString()).ToArray();
