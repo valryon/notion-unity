@@ -162,7 +162,7 @@ namespace NotionUnity
                     return richTextContent;
 
                 case "multi_select":
-                    return item["multi_select"].Select(m => m.ToString()).ToArray();
+                    return item["multi_select"].Select(m => m["name"].ToString()).ToArray();
 
                 case "select":
                     return item["select"]["name"].ToString();
