@@ -151,6 +151,15 @@ namespace NotionUnity
                     }
 
                     return textContent;
+                    
+                case "rich_text":
+                    string richTextContent = string.Empty;
+                    foreach (var t in item["rich_text"])
+                    {
+                        richTextContent += t["plain_text"].ToString();
+                    }
+
+                    return richTextContent;
 
                 case "multi_select":
                     return item["multi_select"].Select(m => m.ToString()).ToArray();
@@ -180,6 +189,9 @@ namespace NotionUnity
                     return item["phone_number"].ToString();
                 
                 case "files":
+                    return string.Empty;
+                    
+                case "relation":
                     return string.Empty;
 
                 default:
