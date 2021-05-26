@@ -1,261 +1,305 @@
 using System;
-using System.Collections;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.Networking;
 
-namespace NotionUnity
+/// <summary>
+/// Notion database downloader
+/// </summary>
+/// <summary>https://developers.notion.com/docs/getting-started</summary>
+public static class NotionDownloader
 {
+    private const string API_URL = "https://api.notion.com/v1";
+    //private const bool DISPLAY_JSON_RESULT = false;
+    private const string API_TOKEN = "secret_XXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+
     /// <summary>
-    /// Notion database downloader
+    /// Download a notion table and return the parsed object
     /// </summary>
-    /// <summary>https://developers.notion.com/docs/getting-started</summary>
-    public class NotionDownloader : MonoBehaviour
+    /// <param name="databaseID"></param>
+    public static async Task<TableResult> GetTableAsync(string databaseID)
     {
-        private const string API_URL = "https://api.notion.com/v1";
+        string route = $"{API_URL}/databases/{databaseID.Replace("-", "")}/query";
 
-        public string token;
-        public string databaseID;
-        public bool displayJSONResult = false;
+        bool fetchMore = true;
+        string cursor = string.Empty;
+        TableResult table = new TableResult();
 
-        private async void Start()
+        Debug.Log("Downloading notion database [" + databaseID + "]...");
+
+        while (fetchMore)
         {
-            var r = await GetTableAsync();
-
-            for (int i = 0; i < r.Lines.Length; i++)
+            var json = await GetRequest(route, cursor);
+            if (json != null)
             {
-                var line = r.Lines[i];
+                var pageTable = new TableResult(json);
+                table.Merge(pageTable);
 
-                Debug.Log(i + " ------------- ");
-
-                foreach (var cell in line.Cells)
+                // Pagination
+                fetchMore = json["has_more"] != null && ((bool) json["has_more"]);
+                if (fetchMore && json["next_cursor"] != null)
                 {
-                    Debug.Log(cell.Name + " (" + cell.Type + ") =" + cell.Value);
+                    cursor = json["next_cursor"].ToString();
                 }
             }
         }
 
-        /// <summary>
-        /// Download a table asynchronously
-        /// </summary>
-        /// <returns></returns>
-        public async Task<TableResult> GetTableAsync()
+        Debug.Log("Download completed: " + table.Lines.Length + " found.");
+
+        return table;
+    }
+
+    /// <summary>
+    /// Make an API call and parse the JSON result on success
+    /// </summary>
+    /// <param name="uri"></param>
+    /// <param name="cursor">Start cursor for paginated results</param>
+    /// <returns></returns>
+    private static async Task<JObject> GetRequest(string uri, string cursor)
+    {
+        string postData = string.Empty;
+        if (string.IsNullOrEmpty(cursor) == false)
         {
-            TaskCompletionSource<TableResult> tcs = new TaskCompletionSource<TableResult>();
-
-            GetTable((result) => tcs.SetResult(result));
-
-            var table = await tcs.Task;
-            return table;
+            postData += "{" +
+                        "   \"start_cursor\": \"" + cursor + "\"" +
+                        "}";
         }
 
-        /// <summary>
-        /// Download a table
-        /// </summary>
-        /// <param name="callback"></param>
-        public void GetTable(Action<TableResult> callback = null)
+        Debug.Log("> Notion API call " + uri + "\n" + postData);
+
+        using (UnityWebRequest webRequest = new UnityWebRequest(uri, "POST"))
         {
-            string route = $"{API_URL}/databases/{databaseID.Replace("-", "")}/query";
-
-            StartCoroutine(GetRequest(route, (json) =>
+            // ⚠ Unity poor implementation of HTTP client forces us to use a HACK to send non-form JSON with a POST verb
+            // https://forum.unity.com/threads/posting-json-through-unitywebrequest.476254/#post-4693241
+            if (string.IsNullOrEmpty(postData) == false)
             {
-                if (json != null)
-                {
-                    var table = new TableResult(json);
-                    callback?.Invoke(table);
-                }
-            }));
-        }
-
-        /// <summary>
-        /// Make an API call and parse the JSON result on success
-        /// </summary>
-        /// <param name="uri"></param>
-        /// <param name="callback"></param>
-        /// <returns></returns>
-        private IEnumerator GetRequest(string uri, Action<JObject> callback)
-        {
-            Debug.Log("> Notion API call " + uri);
-            using (UnityWebRequest webRequest = UnityWebRequest.Post(uri, string.Empty))
-            {
-                webRequest.SetRequestHeader("Authorization", $"Bearer {token}");
-                webRequest.SetRequestHeader("Content-Type", "application/json");
-
-                yield return webRequest.SendWebRequest();
-
-                switch (webRequest.result)
-                {
-                    case UnityWebRequest.Result.ConnectionError:
-                    case UnityWebRequest.Result.DataProcessingError:
-                    case UnityWebRequest.Result.ProtocolError:
-                        Debug.LogError("< Error: " + webRequest.error);
-                        Debug.LogError(webRequest.downloadHandler.text);
-                        break;
-                }
-
-                // Debug
-                if (displayJSONResult) Debug.Log(webRequest.downloadHandler.text);
-
-                try
-                {
-                    var json = JObject.Parse(webRequest.downloadHandler.text);
-                    callback?.Invoke(json);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogException(e);
-                    callback?.Invoke(null);
-                }
+                byte[] bodyRaw = Encoding.UTF8.GetBytes(postData);
+                webRequest.uploadHandler = new UploadHandlerRaw(bodyRaw);
             }
+
+            webRequest.downloadHandler = new DownloadHandlerBuffer();
+
+            webRequest.SetRequestHeader("Authorization", $"Bearer {API_TOKEN}");
+            webRequest.SetRequestHeader("Content-Type", "application/json");
+
+            var op = webRequest.SendWebRequest();
+            await op;
+
+            switch (webRequest.result)
+            {
+                case UnityWebRequest.Result.ConnectionError:
+                case UnityWebRequest.Result.DataProcessingError:
+                case UnityWebRequest.Result.ProtocolError:
+                    Debug.LogError("< Error: " + webRequest.error);
+                    Debug.LogError(webRequest.downloadHandler.text);
+                    break;
+            }
+
+            // Debug
+            //if (DISPLAY_JSON_RESULT) Debug.Log(webRequest.downloadHandler.text);
+
+            try
+            {
+                var json = JObject.Parse(webRequest.downloadHandler.text);
+                return json;
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+            }
+        }
+
+        return null;
+    }
+}
+
+public class TableCell
+{
+    public string Name { get; private set; }
+    public string Type { get; private set; }
+    public object Value { get; private set; }
+    public string RawJSON { get; private set; }
+
+    public TableCell(JProperty jProperty)
+    {
+        Name = jProperty.Name;
+        Value = ParseLine(jProperty.Value);
+        RawJSON = jProperty.ToString();
+    }
+
+    public object ParseLine(JToken item)
+    {
+        if (item["type"] == null) return null;
+
+        Type = item["type"].ToString();
+        // Debug.Log("[" + row + "] " + columnName + " " + type + "\n" + item);
+        switch (Type)
+        {
+            case "title":
+                string titleContent = string.Empty;
+                foreach (var t in item["title"])
+                {
+                    titleContent += t["plain_text"].ToString();
+                }
+
+                return titleContent;
+
+            case "text":
+                string textContent = string.Empty;
+                foreach (var t in item["text"])
+                {
+                    textContent += t["plain_text"].ToString();
+                }
+
+                return textContent;
+
+            case "rich_text":
+                string richTextContent = string.Empty;
+                foreach (var t in item["rich_text"])
+                {
+                    richTextContent += t["plain_text"].ToString();
+                }
+
+                return richTextContent;
+
+            case "multi_select":
+                return item["multi_select"].Select(m => m["name"].ToString()).ToArray();
+
+            case "select":
+                return item["select"]["name"].ToString();
+
+            case "number":
+                return int.Parse(item["number"].ToString());
+
+            case "date":
+                return DateTime.Parse(item["date"]["start"].ToString());
+
+            case "checkbox":
+                return bool.Parse(item["checkbox"].ToString());
+
+            case "people":
+                return item["people"].Select(m => m.ToString()).ToArray();
+
+            case "url":
+                return item["url"].ToString();
+
+            case "email":
+                return item["email"].ToString();
+
+            case "phone_number":
+                return item["phone_number"].ToString();
+
+            case "files":
+                return string.Empty;
+
+            case "relation":
+                return string.Empty;
+
+
+            default:
+                throw new ArgumentException("Unknown/Unsupported item type: " + item["type"]);
         }
     }
 
-    public class TableCell
+    public override string ToString()
     {
-        public string Name { get; private set; }
-        public string Type { get; private set; }
-        public object Value { get; private set; }
-        public string RawJSON { get; private set; }
+        return $"{Name}({Type}) = {Value}";
+    }
+}
 
-        public TableCell(JProperty jProperty)
-        {
-            Name = jProperty.Name;
-            Value = ParseLine(jProperty.Value);
-            RawJSON = jProperty.ToString();
-        }
+public class TableLine
+{
+    public TableCell[] Cells { get; private set; }
 
-        public object ParseLine(JToken item)
-        {
-            if (item["type"] == null) return null;
+    public string RawJSON { get; private set; }
 
-            Type = item["type"].ToString();
-            // Debug.Log("[" + row + "] " + columnName + " " + type + "\n" + item);
-            switch (Type)
-            {
-               case "title":
-                    string titleContent = string.Empty;
-                    foreach (var t in item["title"])
-                    {
-                        titleContent += t["plain_text"].ToString();
-                    }
-
-                    return titleContent;
-
-                case "text":
-                    string textContent = string.Empty;
-                    foreach (var t in item["text"])
-                    {
-                        textContent += t["plain_text"].ToString();
-                    }
-
-                    return textContent;
-                    
-                case "rich_text":
-                    string richTextContent = string.Empty;
-                    foreach (var t in item["rich_text"])
-                    {
-                        richTextContent += t["plain_text"].ToString();
-                    }
-
-                    return richTextContent;
-
-                case "multi_select":
-                    return item["multi_select"].Select(m => m["name"].ToString()).ToArray();
-
-                case "select":
-                    return item["select"]["name"].ToString();
-
-                case "number":
-                    return int.Parse(item["number"].ToString());
-
-                case "date":
-                    return DateTime.Parse(item["date"]["start"].ToString());
-
-                case "checkbox":
-                    return bool.Parse(item["checkbox"].ToString());
-
-                case "people":
-                    return item["people"].Select(m => m.ToString()).ToArray();
-
-                case "url":
-                    return item["url"].ToString();
-
-                case "email":
-                    return item["email"].ToString();
-
-                case "phone_number":
-                    return item["phone_number"].ToString();
-                
-                case "files":
-                    return string.Empty;
-                    
-                case "relation":
-                    return string.Empty;
-
-                default:
-                    throw new ArgumentException("Unknown/Unsupported item type: " + item["type"]);
-            }
-        }
-                
-        public override string ToString()
-        {
-            return $"{Name}({Type}) = {Value}";
-        }
+    public TableLine(JToken token)
+    {
+        RawJSON = token.ToString();
+        Cells = token.Select(t => new TableCell((JProperty) t)).ToArray();
     }
 
-    public class TableLine
+    /// <summary>
+    /// Get a cell using it's Notion name
+    /// </summary>
+    /// <param name="cellName"></param>
+    /// <returns></returns>
+    public TableCell Get(string cellName)
     {
-        public TableCell[] Cells { get; set; }
-
-        public TableLine(JToken token)
-        {
-            Cells = token.Select(t => new TableCell((JProperty) t)).ToArray();
-        }
-        
-        /// <summary>
-        /// Get a cell using it's Notion name
-        /// </summary>
-        /// <param name="cellName"></param>
-        /// <returns></returns>
-        public TableCell Get(string cellName)
-        {
-            return Cells.FirstOrDefault(c => c.Name == cellName);
-        }
+        return Cells.FirstOrDefault(c => c.Name == cellName);
     }
 
-    public class TableResult
+    /// <summary>
+    /// Get a cell's value using it's Notion name
+    /// </summary>
+    /// <param name="cellName"></param>
+    /// <returns></returns>
+    public object GetValue(string cellName)
     {
-        public TableLine[] Lines { get; private set; }
+        var cell = Get(cellName);
+        if (cell != null) return cell.Value;
+        return null;
+    }
 
-        public TableResult(JObject json)
+    public string GetValueString(string cellName)
+    {
+        var value = GetValue(cellName);
+        if (value != null) return value.ToString();
+        else return string.Empty;
+    }
+
+    public int GetValueInt(string cellName)
+    {
+        var value = GetValue(cellName);
+        if (value != null) return (int) value;
+        else return 0;
+    }
+}
+
+public class TableResult
+{
+    public TableLine[] Lines { get; private set; }
+
+    public TableResult()
+    {
+        Lines = new TableLine[0];
+    }
+
+    public TableResult(JObject json)
+    {
+        var objectType = json.GetValue("object");
+        if (objectType == null || objectType.ToString() != "list")
         {
-            var objectType = json.GetValue("object");
-            if (objectType == null || objectType.ToString() != "list")
-            {
-                throw new ArgumentException("API Result is not a list");
-            }
-
-            var results = json["results"];
-            Lines = results.Reverse().Select(p => new TableLine(p["properties"])).ToArray();
+            throw new ArgumentException("API Result is not a list");
         }
 
-        /// <summary>
-        /// Return the value content of a given column for a given line 
-        /// </summary>
-        /// <param name="row"></param>
-        /// <param name="columnName"></param>
-        /// <returns></returns>
-        /// <exception cref="ArgumentException"></exception>
-        public object Value(int row, string columnName)
-        {
-            if (row >= Lines.Length)
-            {
-                throw new ArgumentException("Line number is greater than line count!");
-            }
+        var results = json["results"];
+        Lines = results.Select(p => new TableLine(p["properties"])).ToArray();
+    }
 
-            return Lines[row].Cells.First(l => l.Name == columnName).Value;
+    /// <summary>
+    /// Return the value content of a given column for a given line 
+    /// </summary>
+    /// <param name="row"></param>
+    /// <param name="columnName"></param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentException"></exception>
+    public object Value(int row, string columnName)
+    {
+        if (row >= Lines.Length)
+        {
+            throw new ArgumentException("Line number is greater than line count!");
         }
+
+        return Lines[row].Cells.First(l => l.Name == columnName).Value;
+    }
+
+    public void Merge(TableResult otherTable)
+    {
+        Lines = Lines.Union(otherTable.Lines).ToArray();
     }
 }
