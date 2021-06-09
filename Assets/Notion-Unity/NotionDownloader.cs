@@ -85,6 +85,7 @@ public static class NotionDownloader
 
             webRequest.SetRequestHeader("Authorization", $"Bearer {API_TOKEN}");
             webRequest.SetRequestHeader("Content-Type", "application/json");
+            webRequest.SetRequestHeader("Notion-Version", "2021-05-13");
 
             var op = webRequest.SendWebRequest();
             await op;
