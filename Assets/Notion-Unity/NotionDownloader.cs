@@ -13,9 +13,10 @@ using UnityEngine.Networking;
 /// <summary>https://developers.notion.com/docs/getting-started</summary>
 public static class NotionDownloader
 {
+    private const string API_VERSION = "2021-08-16";
     private const string API_URL = "https://api.notion.com/v1";
     //private const bool DISPLAY_JSON_RESULT = false;
-    private const string API_TOKEN = "secret_XXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    private const string API_TOKEN = "secret_XXXXXXXXXXXXXXXXXXXXXX";
 
     /// <summary>
     /// Download a notion table and return the parsed object
@@ -40,7 +41,7 @@ public static class NotionDownloader
                 table.Merge(pageTable);
 
                 // Pagination
-                fetchMore = json["has_more"] != null && ((bool) json["has_more"]);
+                fetchMore = json["has_more"] != null && ((bool)json["has_more"]);
                 if (fetchMore && json["next_cursor"] != null)
                 {
                     cursor = json["next_cursor"].ToString();
@@ -85,7 +86,7 @@ public static class NotionDownloader
 
             webRequest.SetRequestHeader("Authorization", $"Bearer {API_TOKEN}");
             webRequest.SetRequestHeader("Content-Type", "application/json");
-            webRequest.SetRequestHeader("Notion-Version", "2021-05-13");
+            webRequest.SetRequestHeader("Notion-Version", API_VERSION);
 
             var op = webRequest.SendWebRequest();
             await op;
@@ -174,7 +175,7 @@ public class TableCell
                 return item["select"]["name"].ToString();
 
             case "number":
-                return int.Parse(item["number"].ToString());
+                return float.Parse(item["number"].ToString());
 
             case "date":
                 return DateTime.Parse(item["date"]["start"].ToString());
@@ -198,8 +199,10 @@ public class TableCell
                 return string.Empty;
 
             case "relation":
-                return string.Empty;
+                return item["relation"].Select(m => m["id"].ToString()).ToArray();
 
+            case "rollup":
+                return string.Empty;
 
             default:
                 throw new ArgumentException("Unknown/Unsupported item type: " + item["type"]);
@@ -214,14 +217,16 @@ public class TableCell
 
 public class TableLine
 {
+    public string ID { get; private set; }
     public TableCell[] Cells { get; private set; }
 
     public string RawJSON { get; private set; }
 
-    public TableLine(JToken token)
+    public TableLine(string id, JToken token)
     {
+        ID = id;
         RawJSON = token.ToString();
-        Cells = token.Select(t => new TableCell((JProperty) t)).ToArray();
+        Cells = token.Select(t => new TableCell((JProperty)t)).ToArray();
     }
 
     /// <summary>
@@ -231,7 +236,13 @@ public class TableLine
     /// <returns></returns>
     public TableCell Get(string cellName)
     {
-        return Cells.FirstOrDefault(c => c.Name == cellName);
+        var cell = Cells.FirstOrDefault(c => c.Name == cellName);
+        if (cell == null)
+        {
+            Debug.LogError("Missing cell [" + cellName + "]");
+        }
+
+        return cell;
     }
 
     /// <summary>
@@ -256,7 +267,21 @@ public class TableLine
     public int GetValueInt(string cellName)
     {
         var value = GetValue(cellName);
-        if (value != null) return (int) value;
+        if (value != null) return int.Parse(value.ToString());
+        else return 0;
+    }
+
+    public bool GetValueBool(string cellName)
+    {
+        var value = GetValue(cellName);
+        if (value != null) return (bool)value;
+        else return false;
+    }
+
+    public float GetValueFloat(string cellName)
+    {
+        var value = GetValue(cellName);
+        if (value != null) return float.Parse(value.ToString());
         else return 0;
     }
 }
@@ -279,7 +304,7 @@ public class TableResult
         }
 
         var results = json["results"];
-        Lines = results.Select(p => new TableLine(p["properties"])).ToArray();
+        Lines = results.Select(p => new TableLine(p["id"].ToString(), p["properties"])).ToArray();
     }
 
     /// <summary>
