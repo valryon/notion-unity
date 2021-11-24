@@ -203,6 +203,9 @@ public class TableCell
 
             case "rollup":
                 return string.Empty;
+                
+             case "formula":
+                return item["formula"]["string"].ToString();
 
             default:
                 throw new ArgumentException("Unknown/Unsupported item type: " + item["type"]);
