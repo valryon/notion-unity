@@ -34,7 +34,7 @@ public static class NotionDownloader
 
         while (fetchMore)
         {
-            var json = await GetRequest(route, cursor);
+            var json = await GetRequest(route, cursor, "POST");
             if (json != null)
             {
                 var pageTable = new TableResult(json);
@@ -53,14 +53,36 @@ public static class NotionDownloader
 
         return table;
     }
+    
+    /// <summary>
+    /// Download a notion page CONTENT 
+    /// </summary>
+    /// <param name="pageID"></param>
+    public static async Task<PageContentResult> GetPageContentAsync(string pageID)
+    {
+        string route = $"{Notion.API_URL}/blocks/{pageID}/children";
+
+        Debug.Log("Downloading notion page content [" + pageID + "]...");
+
+        var json = await GetRequest(route, null, "GET");
+        if (json != null)
+        {
+            return new PageContentResult(json);
+        }
+
+        Debug.Log("Download completed.");
+
+        return null;
+    }
 
     /// <summary>
     /// Make an API call and parse the JSON result on success
     /// </summary>
     /// <param name="uri"></param>
     /// <param name="cursor">Start cursor for paginated results</param>
+    /// <param name="method">HTTP Method</param>
     /// <returns></returns>
-    private static async Task<JObject> GetRequest(string uri, string cursor)
+    private static async Task<JObject> GetRequest(string uri, string cursor, string method)
     {
         string postData = string.Empty;
         if (string.IsNullOrEmpty(cursor) == false)
@@ -72,7 +94,7 @@ public static class NotionDownloader
 
         Debug.Log("> Notion API call " + uri + "\n" + postData);
 
-        using (UnityWebRequest webRequest = new UnityWebRequest(uri, "POST"))
+        using (UnityWebRequest webRequest = new UnityWebRequest(uri, method))
         {
             // ⚠ Unity poor implementation of HTTP client forces us to use a HACK to send non-form JSON with a POST verb
             // https://forum.unity.com/threads/posting-json-through-unitywebrequest.476254/#post-4693241
@@ -330,5 +352,77 @@ public class TableResult
     public void Merge(TableResult otherTable)
     {
         Lines = Lines.Union(otherTable.Lines).ToArray();
+    }
+}
+
+public class PageContentResult
+{
+    public PageBlock[] Blocks { get; private set; }
+
+    public string Value
+    {
+        get
+        {
+            StringBuilder s = new StringBuilder();
+            foreach (var block in Blocks)
+            {
+                s.AppendLine(block.ToString());
+            }
+
+            return s.ToString();
+        }
+    }
+
+    public PageContentResult(JObject json)
+    {
+        var objectType = json.GetValue("object");
+        if (objectType == null || objectType.ToString() != "list")
+        {
+            throw new ArgumentException("API Result is not a list");
+        }
+
+        var results = json["results"];
+
+        Blocks = results.Select(p => new PageBlock(p)).ToArray();
+    }
+}
+
+public class PageBlock
+{
+    public string Type { get; private set; }
+    public string Value { get; private set; }
+    public string RawJSON { get; private set; }
+
+    public PageBlock(JToken json)
+    {
+        Value = ParseLine(json);
+        RawJSON = json.ToString();
+    }
+
+    public string ParseLine(JToken item)
+    {
+        if (item["type"] == null) return null;
+
+        Type = item["type"].ToString();
+
+        try
+        {
+            string r = string.Empty;
+            foreach (var t in item[Type]["text"])
+            {
+                r += t["plain_text"];
+            }
+
+            return r;
+        }
+        catch (Exception)
+        {
+            throw new ArgumentException("Unknown/Unsupported item type: " + item["type"]);
+        }
+    }
+
+    public override string ToString()
+    {
+        return Value;
     }
 }
